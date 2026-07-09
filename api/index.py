@@ -8,6 +8,7 @@ Run locally with:  uvicorn api.index:app --reload
 """
 from __future__ import annotations
 
+import gzip
 import json
 import sys
 from pathlib import Path
@@ -26,12 +27,22 @@ from similarity_search import SearchError, SimilaritySearch  # noqa: E402
 app = FastAPI(title="Quotation Pricing Bot")
 
 _DATASET_PATH = Path(__file__).resolve().parent / "dataset.json"
+_DATASET_GZ_PATH = Path(__file__).resolve().parent / "dataset.json.gz"
+
+
+def _read_dataset() -> dict:
+    if _DATASET_PATH.exists():
+        return json.loads(_DATASET_PATH.read_text(encoding="utf-8"))
+    if _DATASET_GZ_PATH.exists():
+        return json.loads(gzip.decompress(_DATASET_GZ_PATH.read_bytes()))
+    raise FileNotFoundError
+
 
 _load_error: str | None = None
 _search: SimilaritySearch | None = None
 _meta: dict = {}
 try:
-    _data = json.loads(_DATASET_PATH.read_text(encoding="utf-8"))
+    _data = _read_dataset()
     _meta = {
         "sheet": _data.get("sheet"),
         "raw_rows": _data.get("raw_rows"),

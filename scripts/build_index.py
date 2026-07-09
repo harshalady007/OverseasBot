@@ -6,6 +6,7 @@ script whenever the Excel dataset changes, then redeploy:
 
     python scripts/build_index.py
 """
+import gzip
 import json
 import sys
 from pathlib import Path
@@ -23,14 +24,15 @@ def main() -> None:
     records = dataset_records(clean_dataset(raw))
     out_path = Path(__file__).resolve().parent.parent / "api" / "dataset.json"
     out_path.parent.mkdir(exist_ok=True)
-    out_path.write_text(
-        json.dumps({"sheet": sheet, "column_mapping": mapping,
-                    "raw_rows": len(raw), "rows": records},
-                   ensure_ascii=False),
-        encoding="utf-8",
-    )
+    payload = json.dumps({"sheet": sheet, "column_mapping": mapping,
+                          "raw_rows": len(raw), "rows": records},
+                         ensure_ascii=False)
+    out_path.write_text(payload, encoding="utf-8")
+    # gzipped copy: small enough to ship inside a serverless bundle/payload
+    gz_path = out_path.with_suffix(".json.gz")
+    gz_path.write_bytes(gzip.compress(payload.encode("utf-8"), 9))
     print(f"Wrote {len(records)} usable rows (of {len(raw)} raw, "
-          f"sheet {sheet!r}) to {out_path}")
+          f"sheet {sheet!r}) to {out_path} and {gz_path}")
 
 
 if __name__ == "__main__":
