@@ -1,13 +1,19 @@
-"""Clean the raw dataset and build a normalized searchable text field."""
+"""Clean the raw dataset and build a normalized searchable text field.
+
+clean_text / normalise_unit are dependency-free so they can run inside a
+lightweight serverless function; only clean_dataset needs pandas.
+"""
 from __future__ import annotations
 
 import re
 
-import pandas as pd
-
 
 class CleaningError(Exception):
     """Raised when cleaning leaves no usable rows."""
+
+
+def _is_na(value: object) -> bool:
+    return value is None or (isinstance(value, float) and value != value)
 
 
 _WS_RE = re.compile(r"\s+")
@@ -47,7 +53,7 @@ _TERM_FIXES = [
 
 def normalise_unit(unit: object) -> str:
     """Canonicalize a unit string; empty string when missing/unknown blank."""
-    if unit is None or (isinstance(unit, float) and pd.isna(unit)):
+    if _is_na(unit):
         return ""
     text = str(unit).strip().lower().rstrip(".")
     if not text or text == "nan":
@@ -60,7 +66,7 @@ def clean_text(text: object) -> str:
 
     Dimensions, grades, units and materials are preserved.
     """
-    if text is None or (isinstance(text, float) and pd.isna(text)):
+    if _is_na(text):
         return ""
     s = str(text)
     if s.strip().lower() in ("nan", "none", "-", "n/a", "na"):
@@ -79,12 +85,14 @@ def clean_text(text: object) -> str:
     return s
 
 
-def clean_dataset(raw: pd.DataFrame) -> pd.DataFrame:
+def clean_dataset(raw: "pd.DataFrame") -> "pd.DataFrame":
     """Drop unusable rows and add cleaned/search columns.
 
     Adds: display_description, clean_description, search_text, unit_norm.
     Keeps only rows with a usable description and a valid positive rate.
     """
+    import pandas as pd
+
     df = raw.copy()
 
     text_parts = ["item_name", "description", "specification"]
@@ -128,3 +136,27 @@ def clean_dataset(raw: pd.DataFrame) -> pd.DataFrame:
             "and a valid rate. Check the Excel file contents."
         )
     return df
+
+
+def dataset_records(df: "pd.DataFrame") -> list[dict]:
+    """Convert a cleaned dataframe to JSON-safe plain dicts for the search
+    index (NaN -> None, numpy numbers -> Python floats)."""
+    fields = (
+        "display_description", "clean_description", "search_text",
+        "unit", "unit_norm", "quantity", "rate", "amount",
+        "currency", "category", "section", "source",
+    )
+    records = []
+    for row in df.to_dict("records"):
+        rec: dict = {}
+        for field in fields:
+            value = row.get(field)
+            if _is_na(value) or (value is not None and str(value) == "<NA>"):
+                value = None
+            elif field in ("quantity", "rate", "amount"):
+                value = float(value)
+            elif value is not None:
+                value = str(value)
+            rec[field] = value
+        records.append(rec)
+    return records

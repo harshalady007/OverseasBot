@@ -16,17 +16,24 @@ unrelated row that only shares the word "finish".
 
 ```text
 OverseasBot/
-├── app.py                  # Streamlit web interface
+├── app.py                  # Streamlit web interface (local use)
 ├── config.py               # paths, API settings, score weights
 ├── data_loader.py          # Excel loading + fuzzy column detection
 ├── cleaner.py              # row cleaning, text normalization, search_text
 ├── attribute_extractor.py  # material/size/finish/scope/... extraction + comparison
-├── similarity_search.py    # TF-IDF + cosine + attribute scoring
+├── similarity_search.py    # pure-Python TF-IDF + cosine + attribute scoring
 ├── deepseek_pricing.py     # DeepSeek API call + statistical fallback
 ├── pricing_engine.py       # ties everything together (predict_price)
+├── api/
+│   ├── index.py            # FastAPI app for Vercel (HTML UI + /api/predict)
+│   └── dataset.json        # prebuilt cleaned dataset for serverless use
+├── scripts/
+│   └── build_index.py      # regenerates api/dataset.json from the Excel
 ├── data/
 │   └── quotation_items.xlsx  # bundled quotation dataset
-├── requirements.txt
+├── vercel.json             # Vercel routing + function config
+├── requirements.txt        # light API deps (what Vercel installs)
+├── requirements-local.txt  # full local deps (Streamlit, pandas, tests)
 ├── README.md
 └── tests/
     └── test_similarity.py
@@ -35,15 +42,16 @@ OverseasBot/
 ## Requirements
 
 - Python 3.10 or newer (developed on 3.11)
-- Dependencies in `requirements.txt`: pandas, openpyxl, scikit-learn,
-  requests, streamlit, pytest
+- `requirements.txt` — API/serverless deps (fastapi, requests)
+- `requirements-local.txt` — everything for local use (adds pandas,
+  openpyxl, streamlit, uvicorn, pytest)
 
 ## Setup (Windows, cmd)
 
 ```bash
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-local.txt
 set DEEPSEEK_API_KEY=your_api_key_here
 streamlit run app.py
 ```
@@ -53,7 +61,7 @@ streamlit run app.py
 ```powershell
 python -m venv venv
 .\venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements-local.txt
 $env:DEEPSEEK_API_KEY="your_api_key_here"
 streamlit run app.py
 ```
@@ -63,7 +71,7 @@ streamlit run app.py
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -r requirements-local.txt
 export DEEPSEEK_API_KEY=your_api_key_here
 streamlit run app.py
 ```
@@ -100,11 +108,38 @@ fields, and picks the sheet with the best coverage. If a rate column is
 missing but amount and quantity exist, rate is computed as
 `amount / quantity` (skipping invalid quantities).
 
-## Running the app
+## Running the app locally
+
+Streamlit (richest UI):
 
 ```bash
 streamlit run app.py
 ```
+
+FastAPI version (same one that runs on Vercel):
+
+```bash
+uvicorn api.index:app --reload
+```
+
+## Deploying to Vercel
+
+Streamlit needs a long-running server, so the Vercel deployment uses the
+FastAPI app in `api/index.py` instead. It serves an HTML interface at `/`
+and a JSON API at `POST /api/predict`
+(`{"description": "...", "top_k": 5}`), plus `GET /api/health`.
+
+- The serverless function reads the prebuilt `api/dataset.json` instead
+  of the Excel file. After changing the Excel dataset, regenerate it and
+  redeploy: `python scripts/build_index.py`
+- Root `requirements.txt` is deliberately light (fastapi, requests) — it
+  is what Vercel installs. Local dev deps live in `requirements-local.txt`.
+- Set `DEEPSEEK_API_KEY` in the Vercel dashboard (Project → Settings →
+  Environment Variables) and redeploy to enable DeepSeek predictions;
+  without it the deployment uses the statistical fallback.
+- Note: the deployed URL is public by default and exposes your
+  historical rates through the matches it returns. Enable Vercel
+  Deployment Protection if that matters.
 
 Then open the URL Streamlit prints (usually http://localhost:8501).
 Enter a description, pick the number of top matches, and click

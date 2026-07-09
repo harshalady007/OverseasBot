@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 import config
-from cleaner import clean_dataset
+from cleaner import clean_dataset, dataset_records
 from data_loader import load_dataset
 from deepseek_pricing import predict_price_with_deepseek
 from similarity_search import SearchError, SimilaritySearch
@@ -29,7 +29,7 @@ class PricingEngine:
         raw, self.column_mapping, self.sheet_name = load_dataset(self.excel_path)
         self.raw_row_count = len(raw)
         self.df = clean_dataset(raw)
-        self.search = SimilaritySearch(self.df)
+        self.search = SimilaritySearch(dataset_records(self.df))
         logger.info(
             "Loaded %d raw rows, %d usable rows from sheet %r",
             self.raw_row_count, len(self.df), self.sheet_name,

@@ -8,7 +8,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from attribute_extractor import compare_attributes, extract_attributes  # noqa: E402
-from cleaner import clean_dataset, clean_text, normalise_unit  # noqa: E402
+from cleaner import clean_dataset, clean_text, dataset_records, normalise_unit  # noqa: E402
 from similarity_search import SearchError, SimilaritySearch  # noqa: E402
 
 
@@ -44,7 +44,7 @@ def make_dataset() -> pd.DataFrame:
 
 @pytest.fixture(scope="module")
 def search():
-    return SimilaritySearch(clean_dataset(make_dataset()))
+    return SimilaritySearch(dataset_records(clean_dataset(make_dataset())))
 
 
 def test_clean_text_preserves_specs():
