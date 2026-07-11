@@ -1,8 +1,9 @@
 """FastAPI version of the pricing bot for Vercel serverless deployment.
 
 Serves a single-page HTML interface at / and a JSON API at /api/predict.
-Reads the prebuilt api/dataset.json (see scripts/build_index.py) so the
-function stays small — no pandas or Excel parsing at runtime.
+Reads the prebuilt dataset (see scripts/build_index.py): a bundled
+api/dataset.json(.gz) if present, otherwise fetched once per cold start
+from the repository's raw GitHub URL and cached in /tmp.
 
 Run locally with:  uvicorn api.index:app --reload
 """
@@ -10,12 +11,14 @@ from __future__ import annotations
 
 import gzip
 import json
+import os
 import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
 
+import requests  # noqa: E402
 from fastapi import FastAPI, HTTPException  # noqa: E402
 from fastapi.responses import HTMLResponse, JSONResponse  # noqa: E402
 from pydantic import BaseModel, Field  # noqa: E402
@@ -28,6 +31,12 @@ app = FastAPI(title="Quotation Pricing Bot")
 
 _DATASET_PATH = Path(__file__).resolve().parent / "dataset.json"
 _DATASET_GZ_PATH = Path(__file__).resolve().parent / "dataset.json.gz"
+_DATASET_URL = os.environ.get(
+    "PRICING_BOT_DATASET_URL",
+    "https://raw.githubusercontent.com/harshalady007/OverseasBot/"
+    "claude/pricing-bot-python-mr0wii/api/dataset.json",
+)
+_TMP_CACHE = Path("/tmp/pricing_bot_dataset.json")
 
 
 def _read_dataset() -> dict:
@@ -35,7 +44,19 @@ def _read_dataset() -> dict:
         return json.loads(_DATASET_PATH.read_text(encoding="utf-8"))
     if _DATASET_GZ_PATH.exists():
         return json.loads(gzip.decompress(_DATASET_GZ_PATH.read_bytes()))
-    raise FileNotFoundError
+    if _TMP_CACHE.exists():
+        try:
+            return json.loads(_TMP_CACHE.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            pass
+    resp = requests.get(_DATASET_URL, timeout=20)
+    resp.raise_for_status()
+    data = resp.json()
+    try:
+        _TMP_CACHE.write_text(resp.text, encoding="utf-8")
+    except OSError:
+        pass  # cache is best-effort only
+    return data
 
 
 _load_error: str | None = None
@@ -49,11 +70,10 @@ try:
         "usable_rows": len(_data.get("rows", [])),
     }
     _search = SimilaritySearch(_data["rows"])
-except FileNotFoundError:
-    _load_error = ("dataset.json not found. Run scripts/build_index.py "
-                   "and redeploy.")
-except (ValueError, KeyError, SearchError) as exc:
-    _load_error = f"Could not load dataset.json: {exc}"
+except requests.RequestException as exc:
+    _load_error = f"Could not download the dataset from {_DATASET_URL}: {exc}"
+except (ValueError, KeyError, OSError, SearchError) as exc:
+    _load_error = f"Could not load the dataset: {exc}"
 
 
 class PredictRequest(BaseModel):
